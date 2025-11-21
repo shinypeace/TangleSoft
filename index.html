@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Мягкие Узлы: Дзен Головоломка</title>
+    <title>Мастер Узлов</title>
     
     <!-- VK Bridge -->
     <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
@@ -23,23 +23,25 @@
             --shadow-dark: 4px 4px 12px #d1d9e6;
             --radius-btn: 16px;
             --card-bg: #ebf2f7;
-            --node-grad-1: #ffffff;
-            --node-grad-2: #dfe6e9;
+            
+            /* Overlay Colors Light */
+            --overlay-bg: rgba(255, 255, 255, 0.95);
         }
 
         body.dark {
             /* Dark Theme */
             --bg-color: #1e272e;
             --app-bg: #1e272e;
-            --primary: #a29bfe; /* Lighter purple for dark mode */
+            --primary: #a29bfe;
             --primary-dark: #6c5ce7;
             --text: #dfe6e9;
             --text-light: #b2bec3;
             --shadow-light: -4px -4px 10px rgba(255, 255, 255, 0.05);
             --shadow-dark: 4px 4px 10px rgba(0, 0, 0, 0.3);
             --card-bg: #1e272e;
-            --node-grad-1: #2d3436;
-            --node-grad-2: #000000;
+            
+            /* Overlay Colors Dark */
+            --overlay-bg: rgba(30, 39, 46, 0.95);
         }
 
         * {
@@ -116,12 +118,8 @@
         }
         
         .screen.overlay {
-            background: rgba(0, 0, 0, 0.85); /* Darker overlay for better contrast */
+            background: var(--overlay-bg);
             backdrop-filter: blur(5px);
-        }
-        
-        body.dark .screen.overlay {
-             background: rgba(0, 0, 0, 0.9);
         }
 
         .pointer-auto { pointer-events: auto; }
@@ -176,9 +174,8 @@
             color: #fff;
             box-shadow: 0 4px 15px rgba(108, 92, 231, 0.4);
         }
-        body.dark .neu-btn.primary {
-            color: #1e272e;
-        }
+        body.dark .neu-btn.primary { color: #1e272e; }
+        
         .neu-btn.primary:active {
             background: var(--primary-dark);
             box-shadow: inset 0 2px 5px rgba(0,0,0,0.2);
@@ -264,6 +261,8 @@
             gap: 15px;
             padding: 10px 4px;
             overflow-y: auto;
+            margin: auto 0; /* Vertical Center Logic */
+            max-height: 100%;
         }
         .game-item {
             display: flex;
@@ -404,7 +403,7 @@
 
     <!-- MAIN MENU -->
     <div id="menuScreen" class="screen">
-        <h1>Мягкие <span>Узлы</span></h1>
+        <h1>Мастер <span>Узлов</span></h1>
         <p class="subtitle">Дзен головоломка</p>
         
         <button id="btnPlay" class="neu-btn primary" style="width: 220px; margin-bottom: 15px;">
@@ -523,7 +522,7 @@
 
     <!-- PAUSE SCREEN -->
     <div id="pauseScreen" class="screen overlay hidden" style="justify-content: center; align-items: center;">
-        <h2 style="margin-bottom: 30px; color: #fff;">Пауза</h2>
+        <h2 style="margin-bottom: 30px; color: var(--text);">Пауза</h2>
         <button id="btnResume" class="neu-btn primary" style="width: 200px; margin-bottom: 15px;">
             Продолжить
         </button>
@@ -536,12 +535,9 @@
 
 <script>
 /**
- * SOFT TANGLE ENGINE v4.0
- * - VK Interstitial Fix
- * - Dark Mode
- * - 10-Win Progression System
- * - Rules & Tutorial
- * - New Games List
+ * SOFT TANGLE ENGINE v4.2
+ * - Fixed Tutorial line rendering (individual segments)
+ * - Renamed to "Мастер Узлов"
  */
 
 // --- CONFIG ---
@@ -585,12 +581,11 @@ const STATE = {
     levelComplete: false,
     startTime: 0,
     levelsSinceAd: 0,
-    // Теперь прогресс хранит победы для КАЖДОГО режима
     progress: { 
         modeWins: new Array(CONFIG.modes.length).fill(0) 
     }, 
     settings: { sound: true, vibro: true, theme: 'light' },
-    justUnlocked: -1 // Хранит индекс только что открытого уровня
+    justUnlocked: -1
 };
 
 // --- VK & ADS ---
@@ -623,14 +618,11 @@ const VK_APP = {
         }
     },
 
-    // ИСПРАВЛЕННАЯ ЛОГИКА РЕКЛАМЫ
     checkInterstitial: function() {
         STATE.levelsSinceAd++;
-        // Сохраняем счетчик, чтобы не сбрасывался при перезагрузке
         saveGameData();
 
         if (STATE.levelsSinceAd >= 3) {
-            // Пытаемся показать
             vkBridge.send('VKWebAppShowInterstitialAd')
                 .then((data) => {
                     if (data.result) {
@@ -640,7 +632,6 @@ const VK_APP = {
                 })
                 .catch((error) => {
                     console.log("Ad error:", error);
-                    // Если ошибка, не сбрасываем счетчик в 0, а пробуем на след уровне
                 });
         }
     },
@@ -658,9 +649,7 @@ async function saveGameData() {
         levelsSinceAd: STATE.levelsSinceAd
     };
     const json = JSON.stringify(data);
-    
     localStorage.setItem('softTangleSave_v4', json);
-    
     if (VK_APP.user_id) {
         const key = `softtangle_data_${VK_APP.user_id}`;
         vkBridge.send('VKWebAppStorageSet', { key: key, value: json }).catch(() => {});
@@ -680,12 +669,9 @@ async function loadGameData() {
         const local = localStorage.getItem('softTangleSave_v4');
         if (local) loadedData = JSON.parse(local);
     }
-
     if (loadedData) {
         if (loadedData.progress) STATE.progress = loadedData.progress;
-        // Fix old save format support
         if (!STATE.progress.modeWins) STATE.progress.modeWins = new Array(CONFIG.modes.length).fill(0);
-        
         if (loadedData.settings) STATE.settings = loadedData.settings;
         STATE.levelsSinceAd = loadedData.levelsSinceAd || 0;
     }
@@ -693,10 +679,8 @@ async function loadGameData() {
 }
 
 function applySettings() {
-    // Apply Theme
     if (STATE.settings.theme === 'dark') document.body.classList.add('dark');
     else document.body.classList.remove('dark');
-    
     updateToggles();
 }
 
@@ -751,10 +735,10 @@ class Node {
         // Body
         ctx.beginPath(); ctx.arc(this.x, this.y, this.r, 0, Math.PI*2);
         const grad = ctx.createRadialGradient(this.x-5, this.y-5, 2, this.x, this.y, this.r);
-        // CSS Var Support trick for canvas? No, need manual values or parsing
         const isDark = document.body.classList.contains('dark');
-        grad.addColorStop(0, isDark ? '#4a5568' : '#ffffff');
-        grad.addColorStop(1, isDark ? '#1a202c' : '#dfe6e9');
+        // Updated Lighter Colors for Dark Mode
+        grad.addColorStop(0, isDark ? '#a4b0be' : '#ffffff');
+        grad.addColorStop(1, isDark ? '#57606f' : '#dfe6e9');
         ctx.fillStyle = grad; ctx.fill();
         // Ring
         if (this.isDragging) {
@@ -878,15 +862,11 @@ const winLevel = () => {
     playSound('win');
     VK_APP.vibrate('success');
     
-    // Increment wins for CURRENT mode
     STATE.progress.modeWins[STATE.modeIdx]++;
     
-    // Check if NEXT mode is unlocked exactly now
     const nextIdx = STATE.modeIdx + 1;
     let unlockedNew = false;
-    
     if (nextIdx < CONFIG.modes.length) {
-        // Logic: If current wins == 10, we just unlocked the next one
         if (STATE.progress.modeWins[STATE.modeIdx] === 10) {
             unlockedNew = true;
             STATE.justUnlocked = nextIdx;
@@ -896,7 +876,6 @@ const winLevel = () => {
     saveGameData();
     VK_APP.checkInterstitial();
 
-    // Particles
     for(let i=0; i<50; i++) {
         STATE.particles.push({
             x: canvas.logicalWidth/2, y: canvas.logicalHeight/2,
@@ -919,7 +898,6 @@ const winLevel = () => {
 const initTutorial = () => {
     const tCanvas = document.getElementById('tutorialCanvas');
     const tCtx = tCanvas.getContext('2d');
-    // Setup scale
     const dpr = window.devicePixelRatio || 1;
     const rect = tCanvas.getBoundingClientRect();
     tCanvas.width = rect.width * dpr;
@@ -927,53 +905,83 @@ const initTutorial = () => {
     tCtx.scale(dpr, dpr);
     
     let tFrame = 0;
+    // 4 nodes with loop connections: 0-1, 1-2, 2-3, 3-0
     let tNodes = [
-        {x: 50, y: 50, tx: 50, ty: 50, c: '#fff'},
-        {x: 150, y: 50, tx: 150, ty: 50, c: '#fff'},
-        {x: 150, y: 150, tx: 150, ty: 150, c: '#fff'},
-        {x: 50, y: 150, tx: 50, ty: 150, c: '#fff'}
+        {x: 50, y: 50, tx: 50, ty: 50},   // 0: TL
+        {x: 150, y: 150, tx: 150, ty: 150}, // 1: BR
+        {x: 150, y: 50, tx: 150, ty: 50},   // 2: TR
+        {x: 50, y: 150, tx: 50, ty: 150}    // 3: BL
     ];
     
-    // Simple cross animation loop
     const drawT = () => {
         if (STATE.screen !== 'rulesModal') return;
         requestAnimationFrame(drawT);
         tCtx.clearRect(0,0,200,200);
         tFrame++;
         
-        // Animation Logic: Swap node 0 and 1 every 100 frames
-        if (tFrame % 200 === 0) {
-            // Reset
-            tNodes[0].tx = 50; tNodes[1].tx = 150;
-        } else if (tFrame % 200 === 100) {
-            // Cross (Make 0 go right, 1 go left)
-            tNodes[0].tx = 150; tNodes[1].tx = 50;
+        if (tFrame % 240 === 0) {
+            // Untangle (Square)
+            tNodes[1].tx = 150; tNodes[1].ty = 150; // 1 to BR
+            tNodes[2].tx = 150; tNodes[2].ty = 50;  // 2 to TR
+        } else if (tFrame % 240 === 120) {
+            // Tangle (Cross)
+            tNodes[1].tx = 150; tNodes[1].ty = 50;  // 1 to TR
+            tNodes[2].tx = 150; tNodes[2].ty = 150; // 2 to BR
         }
         
-        // Update positions
         tNodes.forEach(n => {
             n.x += (n.tx - n.x) * 0.05;
             n.y += (n.ty - n.y) * 0.05;
         });
         
-        // Draw Lines
-        // Cross lines: 0-2 and 1-3
-        const p0 = tNodes[0], p1 = tNodes[1], p2 = tNodes[2], p3 = tNodes[3];
+        // Define Edges: 0-2, 2-1, 1-3, 3-0 (Cycle)
+        // In "Cross" state (Frame 120-240):
+        // 0(TL) -> 2(BR)
+        // 2(BR) -> 1(TR)
+        // 1(TR) -> 3(BL)
+        // 3(BL) -> 0(TL)
+        // 0-2 and 1-3 intersect.
         
-        const isCrossed = intersect(p0, p2, p1, p3);
-        const color = isCrossed ? CONFIG.colors.ropeTangled : CONFIG.colors.ropeFree;
-        
-        tCtx.lineWidth = 4;
+        const p0=tNodes[0], p1=tNodes[1], p2=tNodes[2], p3=tNodes[3];
+        const edges = [
+            [p0, p2], // 0-2
+            [p2, p1], // 2-1
+            [p1, p3], // 1-3
+            [p3, p0]  // 3-0
+        ];
+
+        tCtx.lineWidth = 6;
         tCtx.lineCap = 'round';
-        tCtx.strokeStyle = color;
-        
-        tCtx.beginPath(); tCtx.moveTo(p0.x, p0.y); tCtx.lineTo(p2.x, p2.y); tCtx.stroke();
-        tCtx.beginPath(); tCtx.moveTo(p1.x, p1.y); tCtx.lineTo(p3.x, p3.y); tCtx.stroke();
+
+        edges.forEach((edge, i) => {
+            const a = edge[0];
+            const b = edge[1];
+            
+            // Check intersection against all OTHER edges
+            let isBad = false;
+            for(let j=0; j<edges.length; j++) {
+                 if (i===j) continue;
+                 // Skip if sharing endpoint
+                 if (edges[j][0]===a || edges[j][0]===b || edges[j][1]===a || edges[j][1]===b) continue;
+                 
+                 if (intersect(a, b, edges[j][0], edges[j][1])) {
+                     isBad = true;
+                     break;
+                 }
+            }
+            
+            tCtx.strokeStyle = isBad ? CONFIG.colors.ropeTangled : CONFIG.colors.ropeFree;
+            tCtx.beginPath();
+            tCtx.moveTo(a.x, a.y);
+            tCtx.lineTo(b.x, b.y);
+            tCtx.stroke();
+        });
         
         // Nodes
         tNodes.forEach(n => {
             tCtx.beginPath(); tCtx.arc(n.x, n.y, 8, 0, Math.PI*2);
-            tCtx.fillStyle = '#fff'; tCtx.fill();
+            tCtx.fillStyle = document.body.classList.contains('dark') ? '#a4b0be' : '#fff'; 
+            tCtx.fill();
         });
     };
     drawT();
@@ -1022,7 +1030,7 @@ const goToScreen = (id) => {
     document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
     document.getElementById('hud').classList.add('hidden');
     document.getElementById(id).classList.remove('hidden');
-    STATE.screen = id === 'menuScreen' ? 'menu' : id; // Simple mapping
+    STATE.screen = id === 'menuScreen' ? 'menu' : id;
     
     if(id === 'levelScreen') renderLevels();
     if(id === 'otherGamesScreen') renderOtherGames();
@@ -1047,17 +1055,23 @@ const renderLevels = () => {
     const list = document.getElementById('levelList');
     list.innerHTML = '';
     CONFIG.modes.forEach((m, i) => {
-        // Unlock logic: If it's first level (i=0) OR prev level has >= 10 wins
         const prevWins = i === 0 ? 999 : STATE.progress.modeWins[i-1];
         const locked = prevWins < 10;
         const currentWins = STATE.progress.modeWins[i];
+        
+        // NEW: Specific lock text logic
+        let lockText = "ЗАКРЫТО";
+        if (locked) {
+            const prevName = CONFIG.modes[i-1].name;
+            lockText = `Нужно 10 побед в ${prevName}`;
+        }
 
         const el = document.createElement('div');
         el.className = `level-card ${locked ? 'locked' : ''}`;
         el.innerHTML = `
             <div class="lvl-info">
                 <h3>${m.name}</h3>
-                <p>${locked ? 'Требуется 10 побед в пред.' : `${m.range[0]}-${m.range[1]} Узлов`}</p>
+                <p>${locked ? lockText : `${m.range[0]}-${m.range[1]} Узлов`}</p>
             </div>
             <div class="status-badge ${!locked ? 'open' : ''}">
                 ${locked ? 'ЗАКРЫТО' : `Побед: ${currentWins}`}
@@ -1118,7 +1132,6 @@ document.getElementById('btnGoNextLevel').onclick = () => {
 };
 document.getElementById('btnStayLevel').onclick = () => {
     document.getElementById('unlockModal').classList.add('hidden');
-    // Just stay in win screen or menu? Let's go to menu to see new badge
     goToScreen('levelScreen');
 };
 
