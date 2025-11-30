@@ -535,9 +535,9 @@
 
 <script>
 /**
- * SOFT TANGLE ENGINE v4.2
- * - Fixed Tutorial line rendering (individual segments)
- * - Renamed to "Мастер Узлов"
+ * SOFT TANGLE ENGINE v4.3
+ * - Fixed Interstitial Ads (using NativeAds format)
+ * - Added Button Sounds
  */
 
 // --- CONFIG ---
@@ -623,7 +623,8 @@ const VK_APP = {
         saveGameData();
 
         if (STATE.levelsSinceAd >= 3) {
-            vkBridge.send('VKWebAppShowInterstitialAd')
+            // FIXED: Using NativeAds format for interstitials
+            vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' })
                 .then((data) => {
                     if (data.result) {
                         STATE.levelsSinceAd = 0;
@@ -706,6 +707,18 @@ const playSound = (type) => {
         osc.frequency.linearRampToValueAtTime(600, now + 0.3);
         gain.gain.setValueAtTime(0.1, now);
         gain.gain.linearRampToValueAtTime(0, now + 0.6);
+    } else if (type === 'click') {
+        // UI Click sound
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(800, now);
+        osc.frequency.exponentialRampToValueAtTime(300, now + 0.05);
+        gain.gain.setValueAtTime(0.05, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.05);
+        osc.connect(gain);
+        gain.connect(actx.destination);
+        osc.start(now);
+        osc.stop(now + 0.05);
+        return;
     }
     osc.connect(gain);
     gain.connect(actx.destination);
@@ -1079,6 +1092,7 @@ const renderLevels = () => {
         `;
         el.onclick = () => {
             if(locked) { VK_APP.vibrate('error'); return; }
+            playSound('click'); // Sound on level click
             startGame(i);
         };
         list.appendChild(el);
@@ -1092,12 +1106,27 @@ const renderOtherGames = () => {
         const el = document.createElement('div');
         el.className = 'game-item';
         el.innerHTML = `<div class="game-icon"><img src="${g.icon}" alt=""></div><div class="game-name">${g.name}</div>`;
-        el.onclick = () => VK_APP.openGame(g.appId);
+        el.onclick = () => {
+            playSound('click'); // Sound on game item click
+            VK_APP.openGame(g.appId);
+        };
         list.appendChild(el);
     });
 };
 
-// Buttons
+// Global Button Click Sound Init
+const initButtonSounds = () => {
+    document.querySelectorAll('.neu-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            // Avoid duplicate sound calls if logic already has it, but general UI buttons benefit here
+            // Specifically exclude restart/next level/play if they have custom logic invoking playSound
+            // But 'click' sound is short and distinct from 'pop', so it's fine.
+            playSound('click');
+        });
+    });
+};
+
+// Buttons Logic (Existing + New)
 document.getElementById('btnPlay').onclick = () => goToScreen('levelScreen');
 document.getElementById('btnOtherGamesMenu').onclick = () => goToScreen('otherGamesScreen');
 document.getElementById('btnSettings').onclick = () => document.getElementById('settingsModal').classList.remove('hidden');
@@ -1144,18 +1173,24 @@ const updateToggles = () => {
 document.getElementById('toggleSound').onclick = () => {
     STATE.settings.sound = !STATE.settings.sound;
     if(STATE.settings.sound && !actx) actx = new AudioCtx();
+    playSound('click'); // Feedback
     saveGameData(); updateToggles();
 };
 document.getElementById('toggleVibro').onclick = () => {
     STATE.settings.vibro = !STATE.settings.vibro;
-    VK_APP.vibrate('medium'); saveGameData(); updateToggles();
+    VK_APP.vibrate('medium');
+    playSound('click');
+    saveGameData(); updateToggles();
 };
 document.getElementById('toggleTheme').onclick = () => {
     STATE.settings.theme = STATE.settings.theme === 'dark' ? 'light' : 'dark';
+    playSound('click');
     applySettings(); saveGameData();
 };
 
+// Start
 resize();
+initButtonSounds();
 VK_APP.init();
 loop();
 </script>
