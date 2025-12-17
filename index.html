@@ -535,9 +535,10 @@
 
 <script>
 /**
- * SOFT TANGLE ENGINE v5.0 (Release)
- * - Level Persistence added (save current scramble state)
- * - UI Text Updates: "Побед" -> "Уровень"
+ * SOFT TANGLE ENGINE v6.0 (Release Candidate)
+ * - Fixed Level Persistence (Per-Mode Save)
+ * - Fixed Restart Logic (Reset current level, don't generate new)
+ * - Correct UI Labels
  */
 
 // --- CONFIG ---
@@ -583,7 +584,9 @@ const STATE = {
     levelsSinceAd: 0,
     progress: { 
         modeWins: new Array(CONFIG.modes.length).fill(0),
-        currentLevelState: null // Stores {modeIdx, nodes: [{x,y}], edges: []} to persist level
+        // Dictionary to store active level data per mode:
+        // { 0: { initialNodes: [], edges: [], currentNodes: [] }, 1: ... }
+        activeLevels: {} 
     }, 
     settings: { sound: true, vibro: true, theme: 'light' },
     justUnlocked: -1
@@ -648,16 +651,15 @@ const VK_APP = {
 
 // --- DATA STORAGE ---
 async function saveGameData() {
-    // If inside a game, save current positions
+    // If inside a game and not won, save current positions for THIS mode
     if (STATE.screen === 'game' && !STATE.isSolved) {
-        STATE.progress.currentLevelState = {
-            modeIdx: STATE.modeIdx,
-            nodes: STATE.nodes.map(n => ({x: n.x, y: n.y})),
-            edges: STATE.edges
+        STATE.progress.activeLevels[STATE.modeIdx] = {
+            initialNodes: (STATE.progress.activeLevels[STATE.modeIdx]?.initialNodes || STATE.nodes.map(n => ({x: n.x, y: n.y}))),
+            edges: STATE.edges,
+            currentNodes: STATE.nodes.map(n => ({x: n.x, y: n.y}))
         };
-    } else if (STATE.isSolved) {
-        STATE.progress.currentLevelState = null; // Clear on win
-    }
+    } 
+    // If won, the active level for this mode is cleared in winLevel()
 
     const data = {
         progress: STATE.progress,
@@ -665,7 +667,7 @@ async function saveGameData() {
         levelsSinceAd: STATE.levelsSinceAd
     };
     const json = JSON.stringify(data);
-    localStorage.setItem('softTangleSave_v5', json);
+    localStorage.setItem('softTangleSave_v6', json);
     if (VK_APP.user_id) {
         const key = `softtangle_data_${VK_APP.user_id}`;
         vkBridge.send('VKWebAppStorageSet', { key: key, value: json }).catch(() => {});
@@ -682,12 +684,14 @@ async function loadGameData() {
         } catch (e) {}
     }
     if (!loadedData) {
-        const local = localStorage.getItem('softTangleSave_v5');
+        const local = localStorage.getItem('softTangleSave_v6');
         if (local) loadedData = JSON.parse(local);
     }
     if (loadedData) {
         if (loadedData.progress) STATE.progress = loadedData.progress;
         if (!STATE.progress.modeWins) STATE.progress.modeWins = new Array(CONFIG.modes.length).fill(0);
+        if (!STATE.progress.activeLevels) STATE.progress.activeLevels = {};
+        
         if (loadedData.settings) STATE.settings = loadedData.settings;
         STATE.levelsSinceAd = loadedData.levelsSinceAd || 0;
     }
@@ -802,11 +806,11 @@ const startLevel = (idx) => {
     STATE.screen = 'game';
     resize();
 
-    // Check for saved state
-    const saved = STATE.progress.currentLevelState;
-    if (saved && saved.modeIdx === idx) {
+    // Check for saved state for THIS mode
+    const saved = STATE.progress.activeLevels[idx];
+    if (saved) {
         // Restore Level
-        STATE.nodes = saved.nodes.map(n => new Node(n.x, n.y));
+        STATE.nodes = saved.currentNodes.map(n => new Node(n.x, n.y));
         STATE.edges = saved.edges;
         STATE.particles = [];
         STATE.startTime = Date.now();
@@ -853,7 +857,15 @@ const generateLevel = () => {
     STATE.startTime = Date.now();
     STATE.isSolved = false;
     STATE.levelComplete = false;
-    saveGameData(); // Save new level state immediately
+    
+    // Save new INITIAL state for this mode immediately
+    STATE.progress.activeLevels[STATE.modeIdx] = {
+        initialNodes: STATE.nodes.map(n => ({x: n.x, y: n.y})),
+        edges: STATE.edges,
+        currentNodes: STATE.nodes.map(n => ({x: n.x, y: n.y}))
+    };
+    saveGameData();
+    
     updateHud();
 };
 
@@ -914,8 +926,9 @@ const winLevel = () => {
     VK_APP.vibrate('success');
     
     STATE.progress.modeWins[STATE.modeIdx]++;
-    // Clear saved level state on win
-    STATE.progress.currentLevelState = null;
+    
+    // Clear saved state for this mode because we won it!
+    delete STATE.progress.activeLevels[STATE.modeIdx];
     
     const nextIdx = STATE.modeIdx + 1;
     let unlockedNew = false;
@@ -1114,9 +1127,6 @@ const renderLevels = () => {
             lockText = `Нужно 10 побед в ${prevName}`;
         }
 
-        // Updated text: "Уровень" instead of "Побед" to maintain illusion
-        // But internally we track wins. We just display "Уровень: X"
-        // Let's assume Level = Wins + 1
         const displayLevel = currentWins + 1;
 
         const el = document.createElement('div');
@@ -1163,7 +1173,7 @@ const initButtonSounds = () => {
     });
 };
 
-// Buttons Logic (Existing + New)
+// Buttons Logic
 document.getElementById('btnPlay').onclick = () => goToScreen('levelScreen');
 document.getElementById('btnOtherGamesMenu').onclick = () => goToScreen('otherGamesScreen');
 document.getElementById('btnSettings').onclick = () => document.getElementById('settingsModal').classList.remove('hidden');
@@ -1181,10 +1191,28 @@ document.getElementById('btnResume').onclick = () => {
     document.getElementById('hud').classList.remove('hidden');
     STATE.screen = 'game';
 };
-// Restart manually generates NEW level
-document.getElementById('btnRestart').onclick = () => generateLevel(); 
+
+// CORRECTED RESTART LOGIC
+document.getElementById('btnRestart').onclick = () => {
+    // Check if we have an active level state for this mode
+    const saved = STATE.progress.activeLevels[STATE.modeIdx];
+    if (saved) {
+        // Reset to initial state of THIS level
+        STATE.nodes = saved.initialNodes.map(n => new Node(n.x, n.y));
+        // Reset currentNodes in save data to match initial
+        saved.currentNodes = saved.initialNodes.map(n => ({x:n.x, y:n.y}));
+        STATE.startTime = Date.now();
+        STATE.isSolved = false;
+        STATE.levelComplete = false;
+        saveGameData();
+    } else {
+        // Fallback (shouldn't happen usually if level started correctly)
+        generateLevel();
+    }
+};
+
 document.getElementById('btnExit').onclick = () => {
-    saveGameData(); // Save state on exit too
+    saveGameData(); 
     goToScreen('menuScreen');
 };
 document.getElementById('btnMenuWin').onclick = () => goToScreen('menuScreen');
@@ -1192,7 +1220,7 @@ document.getElementById('btnNextLevel').onclick = () => {
     document.getElementById('winScreen').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
     STATE.screen = 'game';
-    generateLevel(); // Win means new level
+    generateLevel(); // Win means NEW level
 };
 
 // Unlock Modal btns
