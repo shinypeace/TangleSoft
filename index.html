@@ -385,6 +385,9 @@
 </head>
 <body>
 
+<!-- MUSIC ELEMENT -->
+<audio id="bgMusic" src="music.mp3" loop></audio>
+
 <div id="app-frame">
     
     <!-- GAME CANVAS -->
@@ -535,8 +538,10 @@
 
 <script>
 /**
- * SOFT TANGLE ENGINE v6.1 (Release Fixes)
- * - Added Audio Context Resume logic after Ads
+ * SOFT TANGLE ENGINE v7.0 (Music & Audio Fixes)
+ * - Music: bgMusic.mp3 added (loop, low volume).
+ * - Fix: Forced audio context resume after ads.
+ * - Logic: Pause/Resume music on tab switch (VKWebAppViewHide/Restore).
  */
 
 // --- CONFIG ---
@@ -588,6 +593,74 @@ const STATE = {
     justUnlocked: -1
 };
 
+// --- AUDIO SYSTEM ---
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let actx = null;
+const bgMusic = document.getElementById('bgMusic');
+bgMusic.volume = 0.2; // Low volume
+
+// Universal function to wake up both Web Audio API and HTML Audio
+const restoreAudio = () => {
+    // 1. Resume Web Audio
+    if (actx && actx.state === 'suspended') {
+        actx.resume().catch(() => {});
+    }
+    // 2. Resume Music if it should be playing
+    if (STATE.settings.sound && bgMusic.paused) {
+        bgMusic.play().catch(() => {});
+    }
+};
+
+// Global listener to wake up audio on first interaction
+const unlockAudio = () => {
+    if (!actx) actx = new AudioCtx();
+    restoreAudio();
+    // Remove listeners once unlocked
+    window.removeEventListener('touchstart', unlockAudio);
+    window.removeEventListener('click', unlockAudio);
+};
+window.addEventListener('touchstart', unlockAudio, {passive: true});
+window.addEventListener('click', unlockAudio);
+
+const playSound = (type) => {
+    if (!STATE.settings.sound) return;
+    if (!actx) actx = new AudioCtx();
+    
+    if (actx.state === 'suspended') actx.resume();
+
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    const now = actx.currentTime;
+    
+    if (type === 'pop') {
+        osc.frequency.setValueAtTime(600, now);
+        osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.1);
+    } else if (type === 'win') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(300, now);
+        osc.frequency.linearRampToValueAtTime(600, now + 0.3);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.6);
+    } else if (type === 'click') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(800, now);
+        osc.frequency.exponentialRampToValueAtTime(300, now + 0.05);
+        gain.gain.setValueAtTime(0.05, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.05);
+        osc.connect(gain);
+        gain.connect(actx.destination);
+        osc.start(now);
+        osc.stop(now + 0.05);
+        return;
+    }
+    osc.connect(gain);
+    gain.connect(actx.destination);
+    osc.start(now);
+    osc.stop(now + 0.6);
+};
+
 // --- VK & ADS ---
 const VK_APP = {
     user_id: null,
@@ -597,13 +670,16 @@ const VK_APP = {
         try {
             await vkBridge.send('VKWebAppInit');
             
-            // Subscribe to restore audio after ads
+            // Handle App Pausing/Resuming
             vkBridge.subscribe((e) => {
+                if (e.detail.type === 'VKWebAppViewHide') {
+                    // App went to background
+                    bgMusic.pause();
+                    if(actx) actx.suspend();
+                }
                 if (e.detail.type === 'VKWebAppViewRestore' || e.detail.type === 'VKWebAppAudioPaused') {
-                     // Try to resume audio context if it was suspended
-                     if (actx && actx.state === 'suspended') {
-                         actx.resume();
-                     }
+                    // App came back
+                    restoreAudio();
                 }
             });
 
@@ -612,6 +688,10 @@ const VK_APP = {
             this.is_ready = true;
             
             await loadGameData();
+            
+            // Try to start music immediately (might work if VK allows)
+            if (STATE.settings.sound) bgMusic.play().catch(()=>{});
+
             vkBridge.send('VKWebAppShowBannerAd', { banner_location: 'bottom' }).catch(console.log);
         } catch (e) {
             console.log('Offline mode');
@@ -638,17 +718,23 @@ const VK_APP = {
         else if (STATE.modeIdx <= 3) interval = 5;
 
         if (STATE.levelsSinceAd >= interval) {
+            // Mute before ad
+            bgMusic.pause();
+            if(actx) actx.suspend();
+
             vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' })
                 .then((data) => {
                     if (data.result) {
                         STATE.levelsSinceAd = 0;
                         saveGameData();
-                        // Resume audio explicitly after ad success
-                        if (actx && actx.state === 'suspended') actx.resume();
                     }
+                    // CRITICAL: Resume audio after ad closes
+                    restoreAudio();
                 })
                 .catch((error) => {
                     console.log("Ad error:", error);
+                    // Also resume if error
+                    restoreAudio();
                 });
         }
     },
@@ -708,71 +794,16 @@ async function loadGameData() {
 function applySettings() {
     if (STATE.settings.theme === 'dark') document.body.classList.add('dark');
     else document.body.classList.remove('dark');
+    
+    // Apply sound settings immediately
+    if (STATE.settings.sound) {
+        bgMusic.play().catch(()=>{});
+    } else {
+        bgMusic.pause();
+    }
+    
     updateToggles();
 }
-
-// --- AUDIO ---
-const AudioCtx = window.AudioContext || window.webkitAudioContext;
-let actx = null;
-
-// Helper to safely resume context
-const ensureAudioContext = () => {
-    if (actx && actx.state === 'suspended') {
-        actx.resume().catch(e => console.log(e));
-    }
-};
-
-const playSound = (type) => {
-    if (!STATE.settings.sound) return;
-    if (!actx) actx = new AudioCtx();
-    
-    // Ensure context is running
-    if (actx.state === 'suspended') {
-        actx.resume().then(() => {
-            makeSound(type);
-        }).catch(e => console.log(e));
-    } else {
-        makeSound(type);
-    }
-};
-
-const makeSound = (type) => {
-    const osc = actx.createOscillator();
-    const gain = actx.createGain();
-    const now = actx.currentTime;
-    
-    if (type === 'pop') {
-        osc.frequency.setValueAtTime(600, now);
-        osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.linearRampToValueAtTime(0, now + 0.1);
-    } else if (type === 'win') {
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(300, now);
-        osc.frequency.linearRampToValueAtTime(600, now + 0.3);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.linearRampToValueAtTime(0, now + 0.6);
-    } else if (type === 'click') {
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(800, now);
-        osc.frequency.exponentialRampToValueAtTime(300, now + 0.05);
-        gain.gain.setValueAtTime(0.05, now);
-        gain.gain.linearRampToValueAtTime(0, now + 0.05);
-        osc.connect(gain);
-        gain.connect(actx.destination);
-        osc.start(now);
-        osc.stop(now + 0.05);
-        return;
-    }
-    osc.connect(gain);
-    gain.connect(actx.destination);
-    osc.start(now);
-    osc.stop(now + 0.6);
-}
-
-// Global listener to wake up audio on any interaction
-window.addEventListener('touchstart', ensureAudioContext, {passive: true});
-window.addEventListener('click', ensureAudioContext);
 
 // --- GRAPH LOGIC ---
 class Node {
@@ -1096,7 +1127,7 @@ window.addEventListener('mouseup', () => {
     if(STATE.draggedNode) { 
         STATE.draggedNode.isDragging=false; 
         STATE.draggedNode=null; 
-        saveGameData(); // Auto-save on release
+        saveGameData(); 
     } 
 });
 canvas.addEventListener('touchstart', e => {
@@ -1118,7 +1149,7 @@ window.addEventListener('touchend', () => {
     if(STATE.draggedNode) { 
         STATE.draggedNode.isDragging=false; 
         STATE.draggedNode=null; 
-        saveGameData(); // Auto-save on release
+        saveGameData(); 
     } 
 });
 
@@ -1222,21 +1253,16 @@ document.getElementById('btnResume').onclick = () => {
     STATE.screen = 'game';
 };
 
-// CORRECTED RESTART LOGIC
 document.getElementById('btnRestart').onclick = () => {
-    // Check if we have an active level state for this mode
     const saved = STATE.progress.activeLevels[STATE.modeIdx];
     if (saved) {
-        // Reset to initial state of THIS level
         STATE.nodes = saved.initialNodes.map(n => new Node(n.x, n.y));
-        // Reset currentNodes in save data to match initial
         saved.currentNodes = saved.initialNodes.map(n => ({x:n.x, y:n.y}));
         STATE.startTime = Date.now();
         STATE.isSolved = false;
         STATE.levelComplete = false;
         saveGameData();
     } else {
-        // Fallback (shouldn't happen usually if level started correctly)
         generateLevel();
     }
 };
@@ -1250,10 +1276,9 @@ document.getElementById('btnNextLevel').onclick = () => {
     document.getElementById('winScreen').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
     STATE.screen = 'game';
-    generateLevel(); // Win means NEW level
+    generateLevel(); 
 };
 
-// Unlock Modal btns
 document.getElementById('btnGoNextLevel').onclick = () => {
     document.getElementById('unlockModal').classList.add('hidden');
     startLevel(STATE.justUnlocked);
@@ -1271,7 +1296,15 @@ const updateToggles = () => {
 };
 document.getElementById('toggleSound').onclick = () => {
     STATE.settings.sound = !STATE.settings.sound;
-    if(STATE.settings.sound && !actx) actx = new AudioCtx();
+    
+    // Toggle music based on sound setting
+    if (STATE.settings.sound) {
+        if(actx) actx.resume();
+        bgMusic.play().catch(()=>{});
+    } else {
+        bgMusic.pause();
+    }
+
     playSound('click'); 
     saveGameData(); updateToggles();
 };
