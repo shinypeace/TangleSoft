@@ -535,10 +535,8 @@
 
 <script>
 /**
- * SOFT TANGLE ENGINE v6.0 (Release Candidate)
- * - Fixed Level Persistence (Per-Mode Save)
- * - Fixed Restart Logic (Reset current level, don't generate new)
- * - Correct UI Labels
+ * SOFT TANGLE ENGINE v6.1 (Release Fixes)
+ * - Added Audio Context Resume logic after Ads
  */
 
 // --- CONFIG ---
@@ -584,8 +582,6 @@ const STATE = {
     levelsSinceAd: 0,
     progress: { 
         modeWins: new Array(CONFIG.modes.length).fill(0),
-        // Dictionary to store active level data per mode:
-        // { 0: { initialNodes: [], edges: [], currentNodes: [] }, 1: ... }
         activeLevels: {} 
     }, 
     settings: { sound: true, vibro: true, theme: 'light' },
@@ -600,6 +596,17 @@ const VK_APP = {
     init: async function() {
         try {
             await vkBridge.send('VKWebAppInit');
+            
+            // Subscribe to restore audio after ads
+            vkBridge.subscribe((e) => {
+                if (e.detail.type === 'VKWebAppViewRestore' || e.detail.type === 'VKWebAppAudioPaused') {
+                     // Try to resume audio context if it was suspended
+                     if (actx && actx.state === 'suspended') {
+                         actx.resume();
+                     }
+                }
+            });
+
             const user = await vkBridge.send('VKWebAppGetUserInfo');
             this.user_id = user.id;
             this.is_ready = true;
@@ -636,6 +643,8 @@ const VK_APP = {
                     if (data.result) {
                         STATE.levelsSinceAd = 0;
                         saveGameData();
+                        // Resume audio explicitly after ad success
+                        if (actx && actx.state === 'suspended') actx.resume();
                     }
                 })
                 .catch((error) => {
@@ -651,7 +660,6 @@ const VK_APP = {
 
 // --- DATA STORAGE ---
 async function saveGameData() {
-    // If inside a game and not won, save current positions for THIS mode
     if (STATE.screen === 'game' && !STATE.isSolved) {
         STATE.progress.activeLevels[STATE.modeIdx] = {
             initialNodes: (STATE.progress.activeLevels[STATE.modeIdx]?.initialNodes || STATE.nodes.map(n => ({x: n.x, y: n.y}))),
@@ -659,7 +667,6 @@ async function saveGameData() {
             currentNodes: STATE.nodes.map(n => ({x: n.x, y: n.y}))
         };
     } 
-    // If won, the active level for this mode is cleared in winLevel()
 
     const data = {
         progress: STATE.progress,
@@ -707,10 +714,29 @@ function applySettings() {
 // --- AUDIO ---
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 let actx = null;
+
+// Helper to safely resume context
+const ensureAudioContext = () => {
+    if (actx && actx.state === 'suspended') {
+        actx.resume().catch(e => console.log(e));
+    }
+};
+
 const playSound = (type) => {
     if (!STATE.settings.sound) return;
     if (!actx) actx = new AudioCtx();
-    if (actx.state === 'suspended') actx.resume();
+    
+    // Ensure context is running
+    if (actx.state === 'suspended') {
+        actx.resume().then(() => {
+            makeSound(type);
+        }).catch(e => console.log(e));
+    } else {
+        makeSound(type);
+    }
+};
+
+const makeSound = (type) => {
     const osc = actx.createOscillator();
     const gain = actx.createGain();
     const now = actx.currentTime;
@@ -742,7 +768,11 @@ const playSound = (type) => {
     gain.connect(actx.destination);
     osc.start(now);
     osc.stop(now + 0.6);
-};
+}
+
+// Global listener to wake up audio on any interaction
+window.addEventListener('touchstart', ensureAudioContext, {passive: true});
+window.addEventListener('click', ensureAudioContext);
 
 // --- GRAPH LOGIC ---
 class Node {
