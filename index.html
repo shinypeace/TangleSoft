@@ -385,7 +385,7 @@
 </head>
 <body>
 
-<!-- MUSIC ELEMENT -->
+<!-- MUSIC ELEMENT (Low Volume) -->
 <audio id="bgMusic" src="music.mp3" loop></audio>
 
 <div id="app-frame">
@@ -538,10 +538,11 @@
 
 <script>
 /**
- * SOFT TANGLE ENGINE v7.0 (Music & Audio Fixes)
- * - Music: bgMusic.mp3 added (loop, low volume).
- * - Fix: Forced audio context resume after ads.
- * - Logic: Pause/Resume music on tab switch (VKWebAppViewHide/Restore).
+ * SOFT TANGLE ENGINE v8.0 (Final Release)
+ * - Music Volume set to 10% (0.1)
+ * - SFX Volume Increased
+ * - Unified Audio Toggle (Music + SFX)
+ * - Reliable Audio Resume Logic
  */
 
 // --- CONFIG ---
@@ -597,25 +598,21 @@ const STATE = {
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 let actx = null;
 const bgMusic = document.getElementById('bgMusic');
-bgMusic.volume = 0.2; // Low volume
+bgMusic.volume = 0.1; // 10% Volume (Quiet Background)
 
-// Universal function to wake up both Web Audio API and HTML Audio
 const restoreAudio = () => {
-    // 1. Resume Web Audio
     if (actx && actx.state === 'suspended') {
         actx.resume().catch(() => {});
     }
-    // 2. Resume Music if it should be playing
+    // Only resume music if sound is enabled
     if (STATE.settings.sound && bgMusic.paused) {
         bgMusic.play().catch(() => {});
     }
 };
 
-// Global listener to wake up audio on first interaction
 const unlockAudio = () => {
     if (!actx) actx = new AudioCtx();
     restoreAudio();
-    // Remove listeners once unlocked
     window.removeEventListener('touchstart', unlockAudio);
     window.removeEventListener('click', unlockAudio);
 };
@@ -623,7 +620,7 @@ window.addEventListener('touchstart', unlockAudio, {passive: true});
 window.addEventListener('click', unlockAudio);
 
 const playSound = (type) => {
-    if (!STATE.settings.sound) return;
+    if (!STATE.settings.sound) return; // Master Switch
     if (!actx) actx = new AudioCtx();
     
     if (actx.state === 'suspended') actx.resume();
@@ -632,22 +629,23 @@ const playSound = (type) => {
     const gain = actx.createGain();
     const now = actx.currentTime;
     
+    // SFX Volumes Boosted
     if (type === 'pop') {
         osc.frequency.setValueAtTime(600, now);
         osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
-        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.setValueAtTime(0.2, now); // Increased
         gain.gain.linearRampToValueAtTime(0, now + 0.1);
     } else if (type === 'win') {
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(300, now);
         osc.frequency.linearRampToValueAtTime(600, now + 0.3);
-        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.setValueAtTime(0.2, now); // Increased
         gain.gain.linearRampToValueAtTime(0, now + 0.6);
     } else if (type === 'click') {
         osc.type = 'sine';
         osc.frequency.setValueAtTime(800, now);
         osc.frequency.exponentialRampToValueAtTime(300, now + 0.05);
-        gain.gain.setValueAtTime(0.05, now);
+        gain.gain.setValueAtTime(0.1, now); // Increased
         gain.gain.linearRampToValueAtTime(0, now + 0.05);
         osc.connect(gain);
         gain.connect(actx.destination);
@@ -670,15 +668,12 @@ const VK_APP = {
         try {
             await vkBridge.send('VKWebAppInit');
             
-            // Handle App Pausing/Resuming
             vkBridge.subscribe((e) => {
                 if (e.detail.type === 'VKWebAppViewHide') {
-                    // App went to background
                     bgMusic.pause();
                     if(actx) actx.suspend();
                 }
                 if (e.detail.type === 'VKWebAppViewRestore' || e.detail.type === 'VKWebAppAudioPaused') {
-                    // App came back
                     restoreAudio();
                 }
             });
@@ -689,7 +684,6 @@ const VK_APP = {
             
             await loadGameData();
             
-            // Try to start music immediately (might work if VK allows)
             if (STATE.settings.sound) bgMusic.play().catch(()=>{});
 
             vkBridge.send('VKWebAppShowBannerAd', { banner_location: 'bottom' }).catch(console.log);
@@ -718,7 +712,6 @@ const VK_APP = {
         else if (STATE.modeIdx <= 3) interval = 5;
 
         if (STATE.levelsSinceAd >= interval) {
-            // Mute before ad
             bgMusic.pause();
             if(actx) actx.suspend();
 
@@ -728,12 +721,10 @@ const VK_APP = {
                         STATE.levelsSinceAd = 0;
                         saveGameData();
                     }
-                    // CRITICAL: Resume audio after ad closes
                     restoreAudio();
                 })
                 .catch((error) => {
                     console.log("Ad error:", error);
-                    // Also resume if error
                     restoreAudio();
                 });
         }
@@ -795,7 +786,7 @@ function applySettings() {
     if (STATE.settings.theme === 'dark') document.body.classList.add('dark');
     else document.body.classList.remove('dark');
     
-    // Apply sound settings immediately
+    // Sync music state with settings on load
     if (STATE.settings.sound) {
         bgMusic.play().catch(()=>{});
     } else {
@@ -821,17 +812,14 @@ class Node {
         if (this.y > h - pad) { this.y = h - pad; this.vy *= -0.5; }
     }
     draw(ctx) {
-        // Shadow
         ctx.beginPath(); ctx.arc(this.x+3, this.y+3, this.r, 0, Math.PI*2);
         ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fill();
-        // Body
         ctx.beginPath(); ctx.arc(this.x, this.y, this.r, 0, Math.PI*2);
         const grad = ctx.createRadialGradient(this.x-5, this.y-5, 2, this.x, this.y, this.r);
         const isDark = document.body.classList.contains('dark');
         grad.addColorStop(0, isDark ? '#a4b0be' : '#ffffff');
         grad.addColorStop(1, isDark ? '#57606f' : '#dfe6e9');
         ctx.fillStyle = grad; ctx.fill();
-        // Ring
         if (this.isDragging) {
             ctx.lineWidth = 3;
             ctx.strokeStyle = STATE.isSolved ? CONFIG.colors.ropeFree : CONFIG.colors.ropeTangled;
@@ -867,10 +855,8 @@ const startLevel = (idx) => {
     STATE.screen = 'game';
     resize();
 
-    // Check for saved state for THIS mode
     const saved = STATE.progress.activeLevels[idx];
     if (saved) {
-        // Restore Level
         STATE.nodes = saved.currentNodes.map(n => new Node(n.x, n.y));
         STATE.edges = saved.edges;
         STATE.particles = [];
@@ -879,7 +865,6 @@ const startLevel = (idx) => {
         STATE.levelComplete = false;
         updateHud();
     } else {
-        // New Level
         generateLevel();
     }
 };
@@ -919,14 +904,12 @@ const generateLevel = () => {
     STATE.isSolved = false;
     STATE.levelComplete = false;
     
-    // Save new INITIAL state for this mode immediately
     STATE.progress.activeLevels[STATE.modeIdx] = {
         initialNodes: STATE.nodes.map(n => ({x: n.x, y: n.y})),
         edges: STATE.edges,
         currentNodes: STATE.nodes.map(n => ({x: n.x, y: n.y}))
     };
     saveGameData();
-    
     updateHud();
 };
 
@@ -962,17 +945,14 @@ const loop = () => {
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     STATE.edges.forEach((e, i) => {
         const n1 = STATE.nodes[e[0]], n2 = STATE.nodes[e[1]];
-        // Rope
         ctx.beginPath(); ctx.moveTo(n1.x, n1.y); ctx.lineTo(n2.x, n2.y);
         ctx.lineWidth = 6;
         ctx.strokeStyle = status[i] ? CONFIG.colors.ropeTangled : CONFIG.colors.ropeFree;
         ctx.stroke();
-        // Highlight
         ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.stroke();
     });
     STATE.nodes.forEach(n => n.draw(ctx));
     
-    // Particles
     STATE.particles.forEach((p, i) => {
         p.x+=p.vx; p.y+=p.vy; p.vy+=0.1; p.life-=0.02;
         ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life);
@@ -987,8 +967,6 @@ const winLevel = () => {
     VK_APP.vibrate('success');
     
     STATE.progress.modeWins[STATE.modeIdx]++;
-    
-    // Clear saved state for this mode because we won it!
     delete STATE.progress.activeLevels[STATE.modeIdx];
     
     const nextIdx = STATE.modeIdx + 1;
@@ -1032,13 +1010,7 @@ const initTutorial = () => {
     tCtx.scale(dpr, dpr);
     
     let tFrame = 0;
-    // 4 nodes with loop connections: 0-1, 1-2, 2-3, 3-0
-    let tNodes = [
-        {x: 50, y: 50, tx: 50, ty: 50},   // 0: TL
-        {x: 150, y: 150, tx: 150, ty: 150}, // 1: BR
-        {x: 150, y: 50, tx: 150, ty: 50},   // 2: TR
-        {x: 50, y: 150, tx: 50, ty: 150}    // 3: BL
-    ];
+    let tNodes = [{x: 50, y: 50, tx: 50, ty: 50}, {x: 150, y: 150, tx: 150, ty: 150}, {x: 150, y: 50, tx: 150, ty: 50}, {x: 50, y: 150, tx: 50, ty: 150}];
     
     const drawT = () => {
         if (STATE.screen !== 'rulesModal') return;
@@ -1047,57 +1019,31 @@ const initTutorial = () => {
         tFrame++;
         
         if (tFrame % 240 === 0) {
-            // Untangle (Square)
-            tNodes[1].tx = 150; tNodes[1].ty = 150; // 1 to BR
-            tNodes[2].tx = 150; tNodes[2].ty = 50;  // 2 to TR
+            tNodes[1].tx = 150; tNodes[1].ty = 150; tNodes[2].tx = 150; tNodes[2].ty = 50;
         } else if (tFrame % 240 === 120) {
-            // Tangle (Cross)
-            tNodes[1].tx = 150; tNodes[1].ty = 50;  // 1 to TR
-            tNodes[2].tx = 150; tNodes[2].ty = 150; // 2 to BR
+            tNodes[1].tx = 150; tNodes[1].ty = 50; tNodes[2].tx = 150; tNodes[2].ty = 150;
         }
         
-        tNodes.forEach(n => {
-            n.x += (n.tx - n.x) * 0.05;
-            n.y += (n.ty - n.y) * 0.05;
-        });
+        tNodes.forEach(n => { n.x += (n.tx - n.x) * 0.05; n.y += (n.ty - n.y) * 0.05; });
         
-        const p0=tNodes[0], p1=tNodes[1], p2=tNodes[2], p3=tNodes[3];
-        const edges = [
-            [p0, p2], // 0-2
-            [p2, p1], // 2-1
-            [p1, p3], // 1-3
-            [p3, p0]  // 3-0
-        ];
-
-        tCtx.lineWidth = 6;
-        tCtx.lineCap = 'round';
+        const edges = [[tNodes[0], tNodes[2]], [tNodes[2], tNodes[1]], [tNodes[1], tNodes[3]], [tNodes[3], tNodes[0]]];
+        tCtx.lineWidth = 6; tCtx.lineCap = 'round';
 
         edges.forEach((edge, i) => {
-            const a = edge[0];
-            const b = edge[1];
-            
+            const a = edge[0]; const b = edge[1];
             let isBad = false;
             for(let j=0; j<edges.length; j++) {
                  if (i===j) continue;
                  if (edges[j][0]===a || edges[j][0]===b || edges[j][1]===a || edges[j][1]===b) continue;
-                 
-                 if (intersect(a, b, edges[j][0], edges[j][1])) {
-                     isBad = true;
-                     break;
-                 }
+                 if (intersect(a, b, edges[j][0], edges[j][1])) { isBad = true; break; }
             }
-            
             tCtx.strokeStyle = isBad ? CONFIG.colors.ropeTangled : CONFIG.colors.ropeFree;
-            tCtx.beginPath();
-            tCtx.moveTo(a.x, a.y);
-            tCtx.lineTo(b.x, b.y);
-            tCtx.stroke();
+            tCtx.beginPath(); tCtx.moveTo(a.x, a.y); tCtx.lineTo(b.x, b.y); tCtx.stroke();
         });
         
         tNodes.forEach(n => {
             tCtx.beginPath(); tCtx.arc(n.x, n.y, 8, 0, Math.PI*2);
-            tCtx.fillStyle = document.body.classList.contains('dark') ? '#a4b0be' : '#fff'; 
-            tCtx.fill();
+            tCtx.fillStyle = document.body.classList.contains('dark') ? '#a4b0be' : '#fff'; tCtx.fill();
         });
     };
     drawT();
@@ -1123,13 +1069,7 @@ canvas.addEventListener('mousemove', e => {
     STATE.draggedNode.x += (x-STATE.draggedNode.x)*0.6;
     STATE.draggedNode.y += (y-STATE.draggedNode.y)*0.6;
 });
-window.addEventListener('mouseup', () => { 
-    if(STATE.draggedNode) { 
-        STATE.draggedNode.isDragging=false; 
-        STATE.draggedNode=null; 
-        saveGameData(); 
-    } 
-});
+window.addEventListener('mouseup', () => { if(STATE.draggedNode) { STATE.draggedNode.isDragging=false; STATE.draggedNode=null; saveGameData(); } });
 canvas.addEventListener('touchstart', e => {
     if(STATE.screen!=='game') return;
     e.preventDefault();
@@ -1145,13 +1085,7 @@ canvas.addEventListener('touchmove', e => {
     STATE.draggedNode.x += (x-STATE.draggedNode.x)*0.6;
     STATE.draggedNode.y += (y-STATE.draggedNode.y)*0.6;
 }, {passive:false});
-window.addEventListener('touchend', () => { 
-    if(STATE.draggedNode) { 
-        STATE.draggedNode.isDragging=false; 
-        STATE.draggedNode=null; 
-        saveGameData(); 
-    } 
-});
+window.addEventListener('touchend', () => { if(STATE.draggedNode) { STATE.draggedNode.isDragging=false; STATE.draggedNode=null; saveGameData(); } });
 
 // --- NAVIGATION ---
 const goToScreen = (id) => {
@@ -1163,15 +1097,10 @@ const goToScreen = (id) => {
     if(id === 'levelScreen') renderLevels();
     if(id === 'otherGamesScreen') renderOtherGames();
     if(id === 'rulesModal') { STATE.screen = 'rulesModal'; initTutorial(); }
-    if(id === 'menuScreen') {
-         if(VK_APP.is_ready) vkBridge.send('VKWebAppShowBannerAd', { banner_location: 'bottom' }).catch(()=>{});
-    }
+    if(id === 'menuScreen' && VK_APP.is_ready) vkBridge.send('VKWebAppShowBannerAd', { banner_location: 'bottom' }).catch(()=>{});
 };
 
-const startGame = (idx) => {
-    startLevel(idx);
-};
-
+const startGame = (idx) => { startLevel(idx); };
 const updateHud = () => document.getElementById('hudLevelName').innerText = CONFIG.modes[STATE.modeIdx].name;
 
 const renderLevels = () => {
@@ -1181,30 +1110,15 @@ const renderLevels = () => {
         const prevWins = i === 0 ? 999 : STATE.progress.modeWins[i-1];
         const locked = prevWins < 10;
         const currentWins = STATE.progress.modeWins[i];
-        
-        let lockText = "ЗАКРЫТО";
-        if (locked) {
-            const prevName = CONFIG.modes[i-1].name;
-            lockText = `Нужно 10 побед в ${prevName}`;
-        }
-
+        let lockText = locked ? `Нужно 10 побед в ${CONFIG.modes[i-1].name}` : "ЗАКРЫТО";
         const displayLevel = currentWins + 1;
 
         const el = document.createElement('div');
         el.className = `level-card ${locked ? 'locked' : ''}`;
-        el.innerHTML = `
-            <div class="lvl-info">
-                <h3>${m.name}</h3>
-                <p>${locked ? lockText : `${m.range[0]}-${m.range[1]} Узлов`}</p>
-            </div>
-            <div class="status-badge ${!locked ? 'open' : ''}">
-                ${locked ? 'ЗАКРЫТО' : `Уровень: ${displayLevel}`}
-            </div>
-        `;
+        el.innerHTML = `<div class="lvl-info"><h3>${m.name}</h3><p>${locked ? lockText : `${m.range[0]}-${m.range[1]} Узлов`}</p></div><div class="status-badge ${!locked ? 'open' : ''}">${locked ? 'ЗАКРЫТО' : `Уровень: ${displayLevel}`}</div>`;
         el.onclick = () => {
             if(locked) { VK_APP.vibrate('error'); return; }
-            playSound('click'); // Sound on level click
-            startGame(i);
+            playSound('click'); startGame(i);
         };
         list.appendChild(el);
     });
@@ -1217,42 +1131,23 @@ const renderOtherGames = () => {
         const el = document.createElement('div');
         el.className = 'game-item';
         el.innerHTML = `<div class="game-icon"><img src="${g.icon}" alt=""></div><div class="game-name">${g.name}</div>`;
-        el.onclick = () => {
-            playSound('click'); // Sound on game item click
-            VK_APP.openGame(g.appId);
-        };
+        el.onclick = () => { playSound('click'); VK_APP.openGame(g.appId); };
         list.appendChild(el);
     });
 };
 
-// Global Button Click Sound Init
-const initButtonSounds = () => {
-    document.querySelectorAll('.neu-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            playSound('click');
-        });
-    });
-};
+const initButtonSounds = () => { document.querySelectorAll('.neu-btn').forEach(btn => { btn.addEventListener('click', () => { playSound('click'); }); }); };
 
-// Buttons Logic
 document.getElementById('btnPlay').onclick = () => goToScreen('levelScreen');
 document.getElementById('btnOtherGamesMenu').onclick = () => goToScreen('otherGamesScreen');
 document.getElementById('btnSettings').onclick = () => document.getElementById('settingsModal').classList.remove('hidden');
 document.getElementById('btnRules').onclick = () => goToScreen('rulesModal');
-
 document.getElementById('btnCloseSettings').onclick = () => document.getElementById('settingsModal').classList.add('hidden');
 document.getElementById('btnCloseRules').onclick = () => goToScreen('menuScreen');
-
 document.getElementById('btnBackLevel').onclick = () => goToScreen('menuScreen');
 document.getElementById('btnBackGames').onclick = () => goToScreen('menuScreen');
-
 document.getElementById('btnPause').onclick = () => goToScreen('pauseScreen');
-document.getElementById('btnResume').onclick = () => {
-    document.getElementById('pauseScreen').classList.add('hidden');
-    document.getElementById('hud').classList.remove('hidden');
-    STATE.screen = 'game';
-};
-
+document.getElementById('btnResume').onclick = () => { document.getElementById('pauseScreen').classList.add('hidden'); document.getElementById('hud').classList.remove('hidden'); STATE.screen = 'game'; };
 document.getElementById('btnRestart').onclick = () => {
     const saved = STATE.progress.activeLevels[STATE.modeIdx];
     if (saved) {
@@ -1262,33 +1157,14 @@ document.getElementById('btnRestart').onclick = () => {
         STATE.isSolved = false;
         STATE.levelComplete = false;
         saveGameData();
-    } else {
-        generateLevel();
-    }
+    } else { generateLevel(); }
 };
-
-document.getElementById('btnExit').onclick = () => {
-    saveGameData(); 
-    goToScreen('menuScreen');
-};
+document.getElementById('btnExit').onclick = () => { saveGameData(); goToScreen('menuScreen'); };
 document.getElementById('btnMenuWin').onclick = () => goToScreen('menuScreen');
-document.getElementById('btnNextLevel').onclick = () => {
-    document.getElementById('winScreen').classList.add('hidden');
-    document.getElementById('hud').classList.remove('hidden');
-    STATE.screen = 'game';
-    generateLevel(); 
-};
+document.getElementById('btnNextLevel').onclick = () => { document.getElementById('winScreen').classList.add('hidden'); document.getElementById('hud').classList.remove('hidden'); STATE.screen = 'game'; generateLevel(); };
+document.getElementById('btnGoNextLevel').onclick = () => { document.getElementById('unlockModal').classList.add('hidden'); startLevel(STATE.justUnlocked); };
+document.getElementById('btnStayLevel').onclick = () => { document.getElementById('unlockModal').classList.add('hidden'); goToScreen('levelScreen'); };
 
-document.getElementById('btnGoNextLevel').onclick = () => {
-    document.getElementById('unlockModal').classList.add('hidden');
-    startLevel(STATE.justUnlocked);
-};
-document.getElementById('btnStayLevel').onclick = () => {
-    document.getElementById('unlockModal').classList.add('hidden');
-    goToScreen('levelScreen');
-};
-
-// Settings Toggles
 const updateToggles = () => {
     document.getElementById('toggleSound').className = `toggle-switch ${STATE.settings.sound ? 'active' : ''}`;
     document.getElementById('toggleVibro').className = `toggle-switch ${STATE.settings.vibro ? 'active' : ''}`;
@@ -1296,35 +1172,13 @@ const updateToggles = () => {
 };
 document.getElementById('toggleSound').onclick = () => {
     STATE.settings.sound = !STATE.settings.sound;
-    
-    // Toggle music based on sound setting
-    if (STATE.settings.sound) {
-        if(actx) actx.resume();
-        bgMusic.play().catch(()=>{});
-    } else {
-        bgMusic.pause();
-    }
+    if (STATE.settings.sound) { if(actx) actx.resume(); bgMusic.play().catch(()=>{}); } else { bgMusic.pause(); }
+    playSound('click'); saveGameData(); updateToggles();
+};
+document.getElementById('toggleVibro').onclick = () => { STATE.settings.vibro = !STATE.settings.vibro; VK_APP.vibrate('medium'); playSound('click'); saveGameData(); updateToggles(); };
+document.getElementById('toggleTheme').onclick = () => { STATE.settings.theme = STATE.settings.theme === 'dark' ? 'light' : 'dark'; playSound('click'); applySettings(); saveGameData(); };
 
-    playSound('click'); 
-    saveGameData(); updateToggles();
-};
-document.getElementById('toggleVibro').onclick = () => {
-    STATE.settings.vibro = !STATE.settings.vibro;
-    VK_APP.vibrate('medium');
-    playSound('click');
-    saveGameData(); updateToggles();
-};
-document.getElementById('toggleTheme').onclick = () => {
-    STATE.settings.theme = STATE.settings.theme === 'dark' ? 'light' : 'dark';
-    playSound('click');
-    applySettings(); saveGameData();
-};
-
-// Start
-resize();
-initButtonSounds();
-VK_APP.init();
-loop();
+resize(); initButtonSounds(); VK_APP.init(); loop();
 </script>
 </body>
 </html>
